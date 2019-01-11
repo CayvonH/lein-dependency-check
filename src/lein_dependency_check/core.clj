@@ -1,7 +1,6 @@
 (ns lein-dependency-check.core
   (:require [clojure.java.io :as io]
-            [clojure.pprint :refer [pprint]]
-            [clojure.string :refer [starts-with?]])
+            [clojure.pprint :refer [pprint]])
   (:import (org.owasp.dependencycheck Engine)
            (org.owasp.dependencycheck.utils Settings Settings$KEYS)
            (org.owasp.dependencycheck.data.nvdcve CveDB)
@@ -29,10 +28,12 @@
 
 (defn- scan-files
   "Scans the specified files and returns the engine used to scan"
-  [files]
+  [files {:keys [properties-file]}]
   (let [settings (Settings.)
         _ (when (.exists (io/as-file SUPPRESSION_FILE))
             (.setString settings Settings$KEYS/SUPPRESSION_FILE SUPPRESSION_FILE))
+        _ (when properties-file
+            (.mergeProperties settings properties-file))
         engine (Engine. settings)]
     (prn "Scanning" (count files) "file(s)...")
     (doseq [file files]
@@ -51,10 +52,10 @@
 
   engine)
 
-
 (defn- write-report
   [engine report-name output-format output-directory]
-  (.writeReports engine report-name output-directory output-format)
+  (doseq [format output-format]
+    (.writeReports engine report-name output-directory format))
   engine)
 
 (defn- handle-vulnerabilities [engine {:keys [log throw]}]
@@ -72,15 +73,14 @@
 
 (defn main
   "Scans the JAR files found on the class path and creates a vulnerability report."
-  [project-classpath project-name output-format output-directory config]
+  [project-classpath project-name config]
   (reconfigure-log4j)
-  (let [output-format (if (starts-with? output-format ":")
-                        (.substring output-format 1)
-                        output-format)
+  (let [{:keys [output-format output-directory]} config
+        output-format (mapv name output-format)
         output-target (io/file output-directory)]
     (-> project-classpath
         target-files
-        scan-files
+        (scan-files config)
         analyze-files
         (write-report project-name output-format output-target)
         (handle-vulnerabilities config))))
